@@ -1,59 +1,146 @@
 import requests
+from lxml import etree
 import json
-import time
-import random
-from urllib import parse
 
 
-def search(name):
-    try:
-        url = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?ct=24&qqmusic_ver=1298&new_json=1&remotep" \
-              "lace=txt.yqq.center&searchid=50495243386587389&t=0&aggr=1&cr=1&catZhida=1&lossless=0&flag_qc=0&" \
-              "p=1&n=20&w=%s&g_tk=421181271&loginUin=779956774&hostUin=0&format=json&inCharset=utf8&" \
-              "outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0" % name
-        res = requests.get(url).json()
-        if res['code'] != 0:
-            return print("暂未找到歌曲，请稍后试试吧")
-        else:
-            return res['data']
-    except Exception as e:
-        print(e)
 
+class QQMusic(object):
 
-def getMusicByMid(mid):
-    guid = int(random.random() * 2147483647) * int(time.time() * 1000) % 10000000000
-    data = {
-        "req": {
-            "module": "CDN.SrfCdnDispatchServer",
-            "method": "GetCdnDispatch",
-            "param": {
-                "guid": str(guid),
-                "calltype": 0,
-                "userip": ""
-            }
-        },
-        "req_0": {
-            "module": "vkey.GetVkeyServer",
-            "method": "CgiGetVkey",
-            "param": {
-                "guid": str(guid),
-                "songmid": [mid],
-                "songtype": [0],
-                "uin": "779956774",
-                "loginflag": 1,
-                "platform": "20"
-            }
-        },
-        "comm": {
-            "uin": 779956774,
-            "format": "json",
-            "ct": 24,
-            "cv": 0
+    def __init__(self):
+        self.apis = {
+            "search_url": "http://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp",
+            "palysong_url": "https://i.y.qq.com/v8/playsong.html",
+            "get_profile_url": "https://c.y.qq.com/rsc/fcgi-bin/fcg_get_profile_homepage.fcg",
+            "get_profile_order_url": "https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg",
+            "get_diss_songs_url": "https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg",
         }
-    }
-    url = 'https://u.y.qq.com/cgi-bin/musicu.fcg?-=getplaysongvkey7158580598206303&g_tk=421181271&loginUin=779956774&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0&data=%s' % parse.quote(json.dumps(data))
-    res = requests.get(url).json()
-    return res['req']['data']['sip'][0] + res['req_0']['data']['midurlinfo'][0]['purl']
+        self.agents = {
+            "ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46",
+            "pc": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/81.0.4044.129 Safari/537.36 "
+        }
+        self.headers = {
+            "referer": "http://m.y.qq.com",
+            "User-Agent": self.agents['ios'],
+            # cookie需要修改成自己的
+            "cookie": ""
+        }
+
+    # 搜索音乐
+    def search(self, keyword, n=10):
+        parmas = {"w": keyword, "format": "json", "p": 1, "n": n}
+        res = requests.get(self.apis['search_url'], params=parmas, headers=self.headers).json()
+        songs = res['data']['song']['list']
+        return [song['songmid'] for song in songs]
+
+    # 获取音乐链接
+    def getSongUrl(self, mid):
+        params = {
+            "songmid": mid,
+            "ADTAG": "myqq",
+            "from": "myqq",
+            "channel": "10007100"
+        }
+        text = requests.get(self.apis['palysong_url'], params=params, headers=self.headers).text
+        html = etree.HTML(text)
+        try:
+            return html.xpath('/html/body/audio[1]/@src')[0]
+        except IndexError:
+            pass
 
 
-getMusicByMid('001OyHbk2MSIi4')
+    # 获取歌单列表
+    def getDissLists(self):
+        dissList = []
+        params = {
+            "g_tk_new_20200303": 925150183,
+            "g_tk": 908742994,
+            "loginUin": 123456789,
+            "hostUin": 0,
+            "format": "json",
+            "inCharset": "utf8",
+            "outCharset": "utf-8",
+            "notice": 0,
+            "platform": "yqq.json",
+            "needNewCode": 0,
+            "cid": 205360838,
+            "ct": 20,
+            "userid": 0,
+            "reqfrom": 1,
+            "reqtype": 0
+        }
+        headers = {
+            "cookie": self.headers['cookie'],
+            "referer": "https://y.qq.com/portal/profile.html",
+            "user-agent": self.agents['pc']
+        }
+        res = requests.get(self.apis['get_profile_url'], params=params, headers=headers).json()
+        userid = res['data']['creator']['uin']
+        myLove = res['data']['mymusic'][0]
+        dissList.append({
+            "name": "我喜欢",
+            "dissid": myLove["id"],
+            "num": myLove['num0']
+        })
+        dissList += [
+            {
+                "name": diss['title'],
+                "dissid": diss['dissid'],
+                "num": int(diss['subtitle'].split('首')[0])
+            } for diss in res['data']['mydiss']['list']
+        ]
+        params['cid'] = '205360956'
+        params['reqtype'] = 3
+        params['sin'] = 0
+        params['ein'] = 10
+        params['userid'] = userid
+        res = requests.get(self.apis['get_profile_order_url'], params=params, headers=headers).json()
+        dissList += [
+            {
+                "name": diss['dissname'],
+                "dissid": diss['dissid'],
+                "num": diss['songnum']
+            } for diss in res['data']['cdlist']
+        ]
+        return dissList
+
+    # 获取歌单音乐
+    def getDissSongs(self, dissid, page=1, num=10):
+        headers = {
+            "cookie": self.headers['cookie'],
+            "referer": "https://y.qq.com/portal/profile.html",
+            "user-agent": self.agents['pc']
+        }
+        params = {
+            "type": 1,
+            "json": 1,
+            "utf8": 1,
+            "onlysong": 1,
+            "nosign": 1,
+            "new_format": 1,
+            "song_begin": (page - 1) * num,
+            "song_num": num,
+            "ctx": 1,
+            "disstid": dissid,
+            "_": 1588724818395,
+            "g_tk_new_20200303": 925150183,
+            "g_tk": 908742994,
+            "loginUin": 123456789,
+            "hostUin": 0,
+            "format": "json",
+            "inCharset": "utf8",
+            "outCharset": "utf-8",
+            "notice": 0,
+            "platform": "yqq.json",
+            "needNewCode": 0
+        }
+        res = requests.get(self.apis['get_diss_songs_url'], params=params, headers=headers).json()
+        songs = res['songlist']
+        return ([
+            {
+                "name": song['name'],
+                "mid": song['mid']
+            } for song in songs
+        ])
+
+
