@@ -1,7 +1,7 @@
 import requests
 from lxml import etree
 import json
-
+import re
 
 
 class QQMusic(object):
@@ -47,7 +47,6 @@ class QQMusic(object):
             return html.xpath('/html/body/audio[1]/@src')[0]
         except IndexError:
             pass
-
 
     # 获取歌单列表
     def getDissLists(self):
@@ -104,6 +103,26 @@ class QQMusic(object):
         ]
         return dissList
 
+    # 获取榜单歌曲
+    # id 62 飙升榜
+    # id 26 热歌榜
+    # id 27 新歌榜
+    # id 4 流行指数榜
+    # id 60 抖音排行榜
+    def getTopList(self, id):
+        url = f"https://i.y.qq.com/n2/m/share/details/toplist.html?ADTAG=myqq&from=myqq&channel=10007100&id={id}"
+        res = requests.get(url, headers=self.headers).text
+        results = re.findall('<script>var firstPageData = (.*?)</script>', res, re.S)
+        results = json.loads(results[0])
+        songs = [
+            {
+                "name": song['name'],
+                "singer": ' '.join([sing['name'] for sing in song['singer']]),
+                "mid": song['mid']
+            } for song in results['songInfoList']
+        ]
+        return songs
+
     # 获取歌单音乐
     def getDissSongs(self, dissid, page=1, num=10):
         headers = {
@@ -142,5 +161,3 @@ class QQMusic(object):
                 "mid": song['mid']
             } for song in songs
         ])
-
-
